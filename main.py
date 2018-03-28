@@ -5,14 +5,11 @@ import os
 import os.path
 from os import listdir
 from PIL import Image
-#from random import shuffle
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn import datasets, svm, metrics
-from sklearn.decomposition import NMF
-from sklearn.cross_validation import cross_val_score
-from sklearn.metrics import classification_report
+from sklearn import metrics
+from sklearn.decomposition import NMF, PCA
 from sklearn.ensemble import RandomForestClassifier
+
 
 def load_data(folder_path, class_dict):
     img_paths = listdir(folder_path)
@@ -29,7 +26,7 @@ def load_data(folder_path, class_dict):
         # get labels
         image_name = img_path[img_path.rfind("/") + 1: img_path.rfind("_")]
         try:
-            labels.append(float(class_dict[image_name]))  # turn to float?
+            labels.append(float(class_dict[image_name]))
         except KeyError:
             pass
 
@@ -40,8 +37,50 @@ def NMF_decomposition(images):
     model = NMF(n_components=256, init='random', random_state=0)
     W = model.fit_transform(images)
     # H = model.components_
+    print("shape after NMF: ", W[0].shape)
 
     return W
+
+
+def PCA_decomposition(images):
+    model = PCA(n_components=256)
+    reduced_images = model.fit_transform(images)
+    print("shape after PCA: ", reduced_images[0].shape)
+
+    return reduced_images
+
+
+def SVD_decomposition(train_images, test_images):
+    transpose = np.transpose(train_images)
+    [U, S, Vtranspose] = np.linalg.svd(transpose)
+    SA = np.zeros((len(U), len(Vtranspose)), dtype=complex)
+    SA[:len(S), :len(S)] = np.diag(S)
+    component = 256
+    SA_select = SA[0:component, 0:component]
+    invSA_select = np.linalg.inv(SA_select)
+    U_select = U[:, 0:component]
+    V_select = Vtranspose[:, 0:component]
+    train_images_reduced = V_select.tolist()
+
+    result = []
+    for img in test_images:
+        tt = np.transpose(img)
+        tmp = np.dot(np.dot(tt, U_select), invSA_select)
+        result.append(tmp)
+
+    rlist = []
+    for r in result:
+        rlist.append(r.tolist())
+
+    test_images_reduced = []
+    for ele in rlist:
+        rctmp = []
+        for e in ele:
+            rctmp.append(e.real)
+        test_images_reduced.append(rctmp)
+
+    print("shape after SVD: ", train_images_reduced[0].shape)
+    return train_images_reduced, test_images_reduced
 
 
 if __name__ == "__main__":
@@ -49,11 +88,7 @@ if __name__ == "__main__":
         0: "training_sun_rose",
         1: "testing_sun_rose",
         2: "training_dan_tul",
-        3: "testing_dan_tul",
-        4: "p_training_sun_rose",
-        5: "p_testing_sun_rose",
-        6: "p_training_dan_tul",
-        7: "p_testing_dan_tul"
+        3: "testing_dan_tul"
     }
 
     class_dict_sun_rose = {
@@ -80,23 +115,29 @@ if __name__ == "__main__":
     # testing_paths = os.getcwd() + '/data/' + data_dict[3]
     # testing_data, testing_label = load_data(testing_paths, class_dict_dan_tul)
 
-    print(training_data[0])
-    print("original shape: ", training_data[0].shape)
     print("length of training data: ", len(training_data), len(training_label))
+    print("example of training data: ", training_data[0])
+    print("original shape: ", training_data[0].shape)
 
     print(">>> Decomposition reduction")
-    X_train_reduced = NMF_decomposition(training_data)
-    print("shape after reduction: ", X_train_reduced[0].shape)
+    decomposition_method = sys.argv[1]
+    if decomposition_method == 'NMF':
+        X_train_reduced = NMF_decomposition(training_data)
+        X_test_reduced = NMF_decomposition(testing_data)
+    elif decomposition_method == 'PCA':
+        X_train_reduced = PCA_decomposition(training_data)
+        X_test_reduced = PCA_decomposition(testing_data)
+    else:  # SVD
+        X_train_reduced, X_test_reduced = SVD_decomposition(training_data, testing_data)
 
-    # classification
-    print(">>> Classification")
+    # classifier
+    print(">>> Classifier")
     clf = RandomForestClassifier(max_depth=2, random_state=0)
     clf.fit(X_train_reduced, training_label)
 
-    print(">>> Decompose testing data")
-    X_test_reduced = NMF_decomposition(testing_data)
+    # classification result
+    print(">>> Classification")
     score = clf.score(X_test_reduced, testing_label)
-    print("Score: ", score)
-
+    print("score: ", score)
     predicted = clf.predict(X_test_reduced)
-    print("Confusion matrix:\n%s" % metrics.confusion_matrix(testing_label, predicted))
+    print("confusion matrix:\n%s" % metrics.confusion_matrix(testing_label, predicted))
